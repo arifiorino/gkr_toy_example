@@ -6,6 +6,7 @@ use ark_poly::Polynomial;
 
 const logN:usize = 10;
 const N:usize = 1<<logN;
+const M:usize = 50;
 
 fn precompute(r:&Vec<Fr>) -> Vec<Fr>{
   let mut G = vec![Fr::one()];
@@ -57,38 +58,37 @@ fn main() {
   let mut proof_time = std::time::Duration::ZERO;
 
   let mut rng = rand::thread_rng();
-  let a:Vec<_> = (0..N).map(|_|Fr::rand(&mut rng)).collect();
-  let b:Vec<_> = (0..N).map(|_|Fr::rand(&mut rng)).collect();
-  let d:Vec<_> = (0..N).map(|_|Fr::rand(&mut rng)).collect();
-  let c:Vec<_> = a.iter().zip(b.iter()).map(|(x,y)|x * y).collect();
-  let e:Vec<_> = c.iter().zip(d.iter()).map(|(x,y)|x * y).collect();
+  let inputs:Vec<Vec<_>> = (0..M).map(|_|(0..N).map(|_|Fr::rand(&mut rng)).collect()).collect();
+  let mut intermediates:Vec<Vec<_>> = vec![(0..N).map(|j|inputs[0][j] * inputs[1][j]).collect()];
+  for i in 2..M{
+    intermediates.push((0..N).map(|j|intermediates[i-2][j] * inputs[i][j]).collect());
+  }
+  let mut queries = vec![(0..logN).map(|_|Fr::rand(&mut rng)).collect()];
 
-  let g_0:Vec<_> = (0..logN).map(|_|Fr::rand(&mut rng)).collect();
-  let (_,e_g_0) = bookeeping(&e, &g_0);
+  let (_,mut com_last) = bookeeping(&intermediates[M-2], &queries[0]);
 
-  let g_1:Vec<_> = (0..logN).map(|_|Fr::rand(&mut rng)).collect();
+  for i in 0..M-2{
+    queries.push((0..logN).map(|_|Fr::rand(&mut rng)).collect());
+    let start = std::time::Instant::now();
+    let (book_circuit,com_circuit) = bookeeping(&precompute(&queries[i]), &queries[i+1]);
+    let (book_first,com_first) = bookeeping(&intermediates[M-3-i], &queries[i+1]);
+    let (book_second,com_second) = bookeeping(&inputs[M-1-i], &queries[i+1]);
+    let messages = sumcheck_1(book_circuit,book_first,book_second);
+    proof_time += start.elapsed();
 
+    verify_sumcheck(com_last, &messages, &queries[i+1], com_circuit * com_first * com_second);
+    com_last = com_first
+  }
+
+  queries.push((0..logN).map(|_|Fr::rand(&mut rng)).collect());
   let start = std::time::Instant::now();
-  let pre_g_0 = precompute(&g_0);
-  let (book_pre_g_0,pre_g_0_g_1) = bookeeping(&pre_g_0, &g_1);
-  let (book_c,c_g_1) = bookeeping(&c, &g_1);
-  let (book_d,d_g_1) = bookeeping(&d, &g_1);
-  let messages = sumcheck_1(book_pre_g_0,book_c,book_d);
+  let (book_circuit,com_circuit) = bookeeping(&precompute(&queries[M-2]), &queries[M-1]);
+  let (book_first,com_first) = bookeeping(&inputs[0], &queries[M-1]);
+  let (book_second,com_second) = bookeeping(&inputs[1], &queries[M-1]);
+  let messages = sumcheck_1(book_circuit,book_first,book_second);
   proof_time += start.elapsed();
 
-  verify_sumcheck(e_g_0, &messages, &g_1, pre_g_0_g_1 * c_g_1 * d_g_1);
-
-  let g_2:Vec<_> = (0..logN).map(|_|Fr::rand(&mut rng)).collect();
-
-  let start = std::time::Instant::now();
-  let pre_g_1 = precompute(&g_1);
-  let (book_pre_g_1,pre_g_1_g_2) = bookeeping(&pre_g_1, &g_2);
-  let (book_a,a_g_2) = bookeeping(&a, &g_2);
-  let (book_b,b_g_2) = bookeeping(&b, &g_2);
-  let messages = sumcheck_1(book_pre_g_1,book_a,book_b);
-  proof_time += start.elapsed();
-
-  verify_sumcheck(c_g_1, &messages, &g_2, pre_g_1_g_2 * a_g_2 * b_g_2);
+  verify_sumcheck(com_last, &messages, &queries[M-1], com_circuit * com_first * com_second);
 
   println!("{proof_time:?}");
 }
