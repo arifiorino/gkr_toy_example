@@ -4,9 +4,9 @@ use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::Polynomial;
 
-const logN:usize = 10;
+const logN:usize = 12;
 const N:usize = 1<<logN;
-const M:usize = 50;
+const M:usize = 100;
 
 fn precompute(r:&Vec<Fr>) -> Vec<Fr>{
   let mut G = vec![Fr::one()];
@@ -39,7 +39,7 @@ fn sumcheck_1(book_1:Vec<Vec<DensePolynomial<Fr>>>,
               book_3:Vec<Vec<DensePolynomial<Fr>>>)->Vec<DensePolynomial<Fr>>{
   book_1.iter().zip(book_2.iter()).zip(book_3.iter()).map(|((a,b),c)|{
     a.iter().zip(b.iter()).zip(c.iter()).map(|((a,b),c)|{
-      a * b * c
+      (a.naive_mul(b)).naive_mul(c)
     }).reduce(|a,b|a+b).unwrap()
   }).collect()
 }
